@@ -1,5 +1,5 @@
-#进程追踪
-##实验要求
+# 进程追踪
+## 实验要求
 1. 基于模板 process.c 编写多进程的样本程序，实现如下功能：
    所有子进程都并行运行，每个子进程的实际运行时间一般不超过 30 秒；
    父进程向标准输出打印所有子进程的 id，并在所有子进程都退出后才退出；
@@ -33,8 +33,8 @@
   为正    表明当前是父进程
   为零    表明当前是子进程
   2、wait()主动阻塞的系统调用（为等待所有子进程退出）
-
-> process.c 具体实现
+```
+  process.c 具体实现
     /*
     *  oslab3/process.c
     *
@@ -116,9 +116,10 @@
     		last -= sleep_time;
     	}
     }
-
+```
 ### log 文件何时打开
   为了尽早开始记录，因该在内核启动时就打开log文件，即操作系统转移到用户态执行时，也就是创建一号进程init()之前。
+  ```
   >init/main.c
   ...
   move_to_user_mode(); /* 在此之后打开log文件 */
@@ -141,6 +142,7 @@ if (!fork()) {        /* we count on this going ok */
     init();
 }
 //……
+```
 文件描述符0、1、2 分别是标准输入stdin、标准输出stdout、标准错误stderr。
 前四句原本在init()中初始化，现在提前了，需要将init()中的注释掉。
 
@@ -148,6 +150,7 @@ if (!fork()) {        /* we count on this going ok */
 - 为什么要实现此系统调用？
   > 进程的调度是在内核态下，而此时write()功能失效，就像printf()只能在用户态下使用，内核态下需要使用printk()是一样的道理。参考printk()、sys_write()。
   代码如下（功能与printk()相似，放在kernel/printk.c中）：
+  ```
   #include <linux/sched.h>
   #include <sys/stat.h>/* adding fprint to kernel space */
   static char logbuf[1024];
@@ -195,6 +198,7 @@ if (!fork()) {        /* we count on this going ok */
         }
         return count;
  }
+ ```
  jiffies 为滴答次数
  记录了从开机到当前时间的时钟中断发生的次数，在kernel/sched.c中定义。
 
@@ -205,6 +209,7 @@ if (!fork()) {        /* we count on this going ok */
 - fork.c、sched.c、exit.c
 1. 记录创建的新进程
   > 从fork()开始追踪、fork功能由内核中的sys_fork()实现，由该函数在kernel.system_call.s中实现可知，由copy_process()实现进程创建
+```
   sys_fork:
         call find_empty_process
         testl %eax,%eax
@@ -217,8 +222,9 @@ if (!fork()) {        /* we count on this going ok */
         call copy_process
         addl $20,%esp
 1:      ret
-
+```
   > 创建好进程后就可以记录了**新建（N）**
+```
         p->leader = 0;          /* process leadership doesn't inherit */
         p->utime = p->stime = 0;
         p->cutime = p->cstime = 0;
@@ -227,9 +233,11 @@ if (!fork()) {        /* we count on this going ok */
         /* write down the message */
         fprintk(3,"%d\t%c\t%d\n",p->pid,'N', jiffies);
         /* work is down */
+```
     即：记录好创建时间后就可以写入log文件
 
   > 之后新进程将转为**就绪态（J）**
+```
           p->state = TASK_RUNNING;        /* do this last, just in case */
         /*
          * write down the change for every new process
@@ -237,9 +245,11 @@ if (!fork()) {        /* we count on this going ok */
          * lm           2023
          */
         fprintk(3,"%d\tJ\t%d\n",p->pid,jiffies);
+```
     即：当前进程转为就绪态就可以写入log文件
 2. 修改sched.c
 > 位于kernel/sched.c 文件中的sleep_on()与interrutible_sleep_on()会让当前进程进入睡眠状态。
+```
    	tmp = *p;
 	*p = current;
 	current->state = TASK_UNINTERRUPTIBLE;  /*set the sleep process to non interruptible*/
@@ -254,8 +264,9 @@ if (!fork()) {        /* we count on this going ok */
 		fprintk(3, "%ld\t%c\t%ld\n", tmp->pid, 'J', jiffies);
 		/* print message end in 3-processTack */
 	}
-
-   > interrutible_sleep_on()
+```
+```
+    interrutible_sleep_on()
    	tmp=*p;
 	*p=current;
 repeat:	current->state = TASK_INTERRUPTIBLE;
@@ -271,15 +282,17 @@ repeat:	current->state = TASK_INTERRUPTIBLE;
                 fprintk(3, "%ld\t%c\t%ld\n", tmp->pid, 'J', jiffies);
                 /* print message end in 3-processTack */
 	}
-    
-   >	if (tmp){
+```
+```  
+   	if (tmp){
 		tmp->state=0;
 		/* process's state was changed  already wake up */
                 fprintk(3, "%ld\t%c\t%ld\n", tmp->pid, 'J', jiffies);
                 /* print message end in 3-processTack */
 	}
-
-   > 就绪与运行态的转换是通过schedule()
+```
+```
+    就绪与运行态的转换是通过schedule()
    		 /* state is ready */
 		 fprintk(3, "%ld\t%c\t%ld\n", (*p)->pid, 'J', jiffies);
 		 /* the end */
@@ -291,23 +304,24 @@ repeat:	current->state = TASK_INTERRUPTIBLE;
 		  fprintk(3, "%ld\t%c\t%ld\n", task[next]->pid, 'R', jiffies);
 	}
 
-
-   > 主动睡眠 sys_pause() 和 sys_waitpid()
+```
+```
+    主动睡眠 sys_pause() 和 sys_waitpid()
    	current->state = TASK_INTERRUPTIBLE;
 	/* father should wait son finish his task */
 	fprintk(3, "%ld\t%c\t%ld\n", current->pid, 'W', jiffies);
 	/* end  */
 
-   > 睡眠到就绪态依靠 wake_up()
+    睡眠到就绪态依靠 wake_up()
    		(**p).state=0;
 		/* process is wake up */
 		fprintk(3, "%ld\t%c\t%ld\n", (*p)->pid, 'J', jiffies);
 		/* the end */
-
+```
 3. exit.c
    当一个进程运行结束或中途停止，那么内核需要释放此进程所占用的资源。当用户程序调用exit()时会执行内核函数do_exit()，此函数首先释放进程代码段、数据段占用的内存页面，关闭进程打开的所有文件等操作。
-
-   >	if (current->leader)
+```
+   	if (current->leader)
 		kill_session();
 	current->state = TASK_ZOMBIE;
 	/* process exit */
@@ -318,7 +332,7 @@ repeat:	current->state = TASK_INTERRUPTIBLE;
 	schedule();
 	return (-1);	/* just to suppress warnings */
 
-   > 	if (flag) {
+  	if (flag) {
 		if (options & WNOHANG)
 			return 0;
 		current->state=TASK_INTERRUPTIBLE;
@@ -327,7 +341,7 @@ repeat:	current->state = TASK_INTERRUPTIBLE;
 		/* end */
 		schedule();
    }
-
+```
 
 
 
